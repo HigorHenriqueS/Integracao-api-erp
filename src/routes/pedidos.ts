@@ -95,14 +95,31 @@ export async function pedidosRoutes(app: FastifyInstance) {
         const consulta = await db.query(
         `
             SELECT
-            id,
-            status,
-            id_pedido_erp,
-            proxima_tentativa_em,
-            created_at,
-            updated_at
-            FROM pedidos
-            WHERE id = $1
+            p.id,
+            p.status,
+            p.id_pedido_erp,
+            p.proxima_tentativa_em,
+            p.created_at,
+            p.updated_at,
+            COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'numero_tentativa', t.numero_tentativa,
+                            'resultado', t.resultado,
+                            'codigo_erro', t.codigo_erro,
+                            'iniciada_em', t.iniciada_em,
+                            'finalizada_em', t.finalizada_em
+                        )
+                        ORDER BY t.numero_tentativa
+                    )
+                    FROM tentativas_integracao t
+                    WHERE t.pedido_id = p.id
+                ),
+                '[]'::jsonb
+            ) AS tentativas
+            FROM pedidos p
+            WHERE p.id = $1
         `,
         [id],
         );
@@ -115,25 +132,7 @@ export async function pedidosRoutes(app: FastifyInstance) {
         });
         }
 
-        const tentativas = await db.query(
-        `
-            SELECT
-            numero_tentativa,
-            resultado,
-            codigo_erro,
-            iniciada_em,
-            finalizada_em
-            FROM tentativas_integracao
-            WHERE pedido_id = $1
-            ORDER BY numero_tentativa
-        `,
-        [id],
-        );
-
-        return {
-        ...pedido,
-        tentativas: tentativas.rows,
-        };
+        return pedido;
     },
     );
   app.post<{ Body: DadosPedido }>(
