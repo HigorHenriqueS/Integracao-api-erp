@@ -1,303 +1,99 @@
 # Integração API e ERP
 
-API para receber pedidos de venda, persistir seu estado e simular
-a integração com um ERP corporativo.
+API de pedidos com Node.js 24, TypeScript, Fastify e PostgreSQL.
+Inclui idempotência, controle de concorrência e ERP simulado com recuperação de falhas.
 
-## Tecnologias
+## Pré-requisitos
 
-- Node.js 24
-- TypeScript
-- Fastify
-- PostgreSQL
-- Executor de testes nativo do Node.js
+- Node.js 24 e npm.
+- PostgreSQL em execução, com `psql` no PATH e um usuário com permissão para criar bancos.
 
-## Requisitos
+Execute os comandos abaixo na raiz do projeto. Os exemplos usam PostgreSQL
+em `localhost:5432` com usuário `postgres`; ajuste conforme seu ambiente.
 
-- Node.js 24
-- PostgreSQL em execução
-- Bancos `api_erp` e `api_erp_test`
-
-Docker não é necessário.
-
-## Instalação
+## 1. Instalar e configurar
 
 ```bash
 npm ci
 ```
 
-Copie `.env.example` para `.env` e preencha as configurações locais:
+Copie `.env.example` para `.env` e preencha `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_USER` e `DB_PASSWORD`. Para desenvolvimento, use `DB_NAME=api_erp`.
 
-```dotenv
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=api_erp
-DB_USER=postgres
-DB_PASSWORD=
-```
+Use dados fictícios e mantenha os arquivos de credenciais fora do Git.
 
-Não versione arquivos com senhas.
+## 2. Criar o banco e as tabelas
 
-## Banco de dados
-
-Execute a migration no banco de desenvolvimento:
+Execute uma única vez, para um banco novo:
 
 ```bash
+psql -h localhost -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE api_erp;"
 psql -h localhost -p 5432 -U postgres -d api_erp -v ON_ERROR_STOP=1 -f sql/001_create_orders.sql
 ```
 
-No Windows, se `psql` não estiver no PATH:
+Se o banco já existe, pule o primeiro comando. A migration deve ser aplicada
+somente em um banco vazio; esta versão não possui gerenciador de migrations.
+O `psql` solicitará a senha do usuário, se necessário.
 
-```powershell
-& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -h localhost -p 5432 -U postgres -d api_erp -v ON_ERROR_STOP=1 -f .\sql\001_create_orders.sql
-```
+No Windows, se `psql` não estiver no PATH, substitua `psql` pelo caminho da sua
+instalação, por exemplo: `& "C:\Program Files\PostgreSQL\18\bin\psql.exe"` no PowerShell.
 
-A migration deve ser executada uma única vez em cada banco vazio.
-Não há um gerenciador automático de migrations nesta versão.
-
-## Execução
-
-Desenvolvimento:
+## 3. Executar
 
 ```bash
 npm run dev
 ```
 
-Compilar e executar:
+A API estará em `http://127.0.0.1:3000`. Consulte `/health` para verificar a API
+e `/ready` para verificar a conexão com o banco.
+
+Para executar a versão compilada:
 
 ```bash
 npm run build
 npm start
 ```
 
-A API escuta em `http://127.0.0.1:3000`.
+## 4. Executar os testes
 
-## Demonstração rápida
+Copie `.env.example` para `.env.test`, preencha as credenciais e altere
+`DB_NAME` para `api_erp_test`.
 
-Com a API rodando, abra outro terminal na pasta do projeto e execute:
-
-```bash
-npm run demo
-```
-
-O script usa dados fictícios e cria um pedido novo a cada execução.
-Ele mostra a repetição com a mesma chave, o timeout após o aceite pelo
-ERP, a reconciliação e o histórico do pedido.
-
-## Endpoints
-
-| Método | Rota | Função |
-|---|---|---|
-| GET | `/health` | Verifica se a API está ativa |
-| GET | `/ready` | Verifica a conexão com o banco |
-| POST | `/pedidos` | Valida e persiste um pedido |
-| GET | `/pedidos/:id` | Consulta estado e tentativas |
-| POST | `/pedidos/:id/processar` | Processa ou reconcilia um pedido |
-
-### Criar pedido
-
-Envie o cabeçalho `Idempotency-Key` com uma chave estável para
-a mesma operação de negócio.
-
-```http
-POST /pedidos
-Content-Type: application/json
-Idempotency-Key: pedido-001
-```
-
-```json
-{
-  "cliente_id": "cliente-001",
-  "itens": [
-    {
-      "produto_id": "produto-001",
-      "quantidade": 2,
-      "preco_unitario_centavos": 1500
-    }
-  ]
-}
-```
-
-Os preços são representados em centavos inteiros.
-
-Respostas:
-
-- `201`: pedido criado.
-- `200`: mesma chave e mesmo conteúdo; retorna o pedido existente.
-- `400`: entrada inválida.
-- `409`: chave já utilizada com conteúdo diferente.
-
-A criação persiste o pedido como `pendente`.
-O processamento é acionado separadamente.
-
-### Processar pedido
-
-```http
-POST /pedidos/{id}/processar
-Content-Type: application/json
-```
-
-```json
-{
-  "cenario": "sucesso"
-}
-```
-
-Cenários disponíveis:
-
-- `sucesso`
-- `erro_transitorio`
-- `erro_permanente`
-- `timeout_apos_processar`
-
-O campo `cenario` controla exclusivamente o simulador do desafio.
-
-O endpoint retorna `200` quando registra o resultado da tentativa,
-inclusive quando o resultado de negócio é uma falha. Consulte o
-campo `status` da resposta.
-
-Outras respostas:
-
-- `400`: entrada inválida.
-- `404`: pedido não encontrado.
-- `409`: conflito de processamento ou estado que não permite nova tentativa.
-
-## Arquitetura
-
-- `src/app.ts`: configuração da aplicação e tratamento de erros.
-- `src/server.ts`: inicialização e encerramento.
-- `src/db.ts`: pool de conexões PostgreSQL.
-- `src/routes/pedidos.ts`: endpoints e validação.
-- `src/services/processar-pedido.ts`: processamento e transações.
-- `src/services/erp.ts`: ERP simulado.
-- `sql/`: estrutura do banco.
-- `tests/`: testes de integração com PostgreSQL real.
-
-A solução mantém o fluxo explícito e usa o PostgreSQL para
-persistência e controle de concorrência, sem fila ou cache.
-
-## Idempotência
-
-A coluna `chave_id` possui uma restrição única no PostgreSQL.
-
-A criação usa `INSERT ... ON CONFLICT DO NOTHING`. Isso evita que
-requisições simultâneas com a mesma chave criem múltiplos pedidos.
-
-Um hash SHA-256 do conteúdo normalizado permite detectar o uso da
-mesma chave com dados diferentes.
-
-A ordem das propriedades JSON não altera o hash, pois o objeto é
-reconstruído em ordem fixa. A ordem dos itens do pedido faz parte
-do conteúdo e altera o hash.
-
-A garantia depende de o cliente reutilizar a mesma chave.
-Chaves diferentes podem criar pedidos com conteúdo idêntico.
-
-## Concorrência no processamento
-
-O processamento utiliza `SELECT ... FOR UPDATE NOWAIT` dentro
-de uma transação.
-
-Enquanto uma operação mantém a trava, outra chamada para o mesmo
-pedido recebe `409`. Após a conclusão, novas chamadas retornam o
-resultado existente sem criar outra tentativa.
-
-A numeração de tentativas é calculada enquanto a trava do pedido
-está ativa e possui uma restrição única por pedido.
-
-## Estados e recuperação
-
-| Resultado | Estado do pedido | Recuperação |
-|---|---|---|
-| Sucesso | `concluido` | Não envia novamente |
-| Falha transitória | `aguardando_retentativa` | Nova chamada manual |
-| Rejeição permanente | `falhou` | Bloqueia nova tentativa |
-| Timeout após aceite | `resultado_desconhecido` | Consulta o ERP |
-
-Na reconciliação, se o simulador confirmar o aceite, o pedido é
-concluído sem reenvio. Se não houver confirmação, o estado
-desconhecido é mantido.
-
-Não há retentativas automáticas ou agendamento nesta versão.
-A coluna `proxima_tentativa_em` está reservada para uma evolução.
-
-## Rastreabilidade e segurança
-
-Cada tentativa registra número, resultado, código de erro e horários.
-
-A consulta do pedido retorna seu estado e histórico, sem incluir
-o conteúdo completo ou a chave de idempotência.
-
-Os logs de processamento incluem o identificador do pedido.
-Falhas internas retornam uma mensagem genérica com o identificador
-da requisição, sem expor mensagens brutas do banco.
-
-Autenticação e autorização não foram implementadas.
-Use somente dados fictícios e execução local.
-
-## Testes
-
-Crie `.env.test` com as mesmas variáveis do `.env`, mas utilizando:
-
-```dotenv
-DB_NAME=api_erp_test
-```
-
-Execute a migration também nesse banco vazio:
+Crie o banco de testes e aplique a migration uma única vez:
 
 ```bash
+psql -h localhost -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE api_erp_test;"
 psql -h localhost -p 5432 -U postgres -d api_erp_test -v ON_ERROR_STOP=1 -f sql/001_create_orders.sql
 ```
 
-Execute:
+Se o banco já existe, pule sua criação. Depois da configuração, execute:
 
 ```bash
 npm test
 ```
 
-Os testes exigem `api_erp_test` e removem apenas os registros
-criados pela execução. Não é necessário iniciar o servidor HTTP:
-as requisições são feitas com `app.inject`.
+Os 12 testes usam PostgreSQL real e exigem o banco `api_erp_test`.
+Não é necessário iniciar a API: as requisições usam `app.inject`.
+Ao terminar, os testes removem somente os registros criados pela execução.
 
-Os 12 testes cobrem:
+## 5. Demonstrar o fluxo
 
-- Criação de pedido válido.
-- Rejeição de pedido sem itens.
-- Rejeição de requisição sem chave.
-- Repetição com mesma chave e conteúdo.
-- Conflito de conteúdo para a mesma chave.
-- Criação concorrente sem duplicação.
-- Processamento com sucesso.
-- Repetição de processamento concluído.
-- Recuperação de falha transitória.
-- Bloqueio após rejeição permanente.
-- Reconciliação após timeout.
-- Processamento concorrente.
+Com a API rodando, execute em outro terminal:
 
-## Limitações e evolução para produção
+```bash
+npm run demo
+```
 
-O ERP simulado mantém seus registros em memória. Eles são perdidos
-ao reiniciar a API e não são compartilhados entre instâncias.
+A demonstração cria um pedido fictício, repete a criação com a mesma chave,
+simula timeout após o aceite pelo ERP, reconcilia e consulta o histórico.
+Cada execução utiliza uma chave nova.
 
-O timeout é representado por um resultado controlado. Não há
-uma chamada de rede real nem medição de prazo de resposta.
+## Documentação técnica
 
-A transação permanece aberta durante a interação com o simulador.
-Em um ERP real e lento, isso manteria travas e conexões ocupadas.
+- [Referência da API](docs/api.md): endpoints, exemplos e respostas HTTP.
+- [Arquitetura e decisões](docs/arquitetura.md): idempotência, concorrência,
+  tratamento de falhas, rastreabilidade, cobertura de testes e limitações.
 
-O estado `processando` e a tentativa só são confirmados no commit.
-Se o ERP aceitar o pedido e o processo cair antes do commit, o
-registro da tentativa poderá ser perdido. Não existe transação
-atômica entre o banco da aplicação e um ERP externo.
-
-A solução não promete processamento exatamente uma vez nem
-ausência de duplicação entre reinicializações do simulador.
-
-Antes de produção, seria necessário:
-
-- Persistir a intenção de envio antes da chamada externa.
-- Utilizar idempotência durável e reconciliação no ERP.
-- Adotar um worker com recuperação de tarefas interrompidas.
-- Implementar retentativas com backoff e limite de tentativas.
-- Configurar timeouts reais e tratamento de falhas de transporte.
-- Adicionar autenticação, autorização e isolamento por cliente.
-- Definir retenção de dados, métricas, alertas e gestão de migrations.
+A solução foi preparada para demonstração local. O ERP é simulado;
+autenticação, autorização e retentativas automáticas são propostas para produção,
+conforme detalhado na documentação de arquitetura.
