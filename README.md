@@ -71,6 +71,18 @@ npm start
 
 A API escuta em `http://127.0.0.1:3000`.
 
+## Demonstração rápida
+
+Com a API rodando, abra outro terminal na pasta do projeto e execute:
+
+```bash
+npm run demo
+```
+
+O script usa dados fictícios e cria um pedido novo a cada execução.
+Ele mostra a repetição com a mesma chave, o timeout após o aceite pelo
+ERP, a reconciliação e o histórico do pedido.
+
 ## Endpoints
 
 | Método | Rota | Função |

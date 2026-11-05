@@ -21,7 +21,7 @@ type PedidoSalvo = {
 };
 
 export async function pedidosRoutes(app: FastifyInstance) {
-    app.post<{ Params: { id: string }; Body: { cenario: CenarioErp };  }>(
+  app.post<{ Params: { id: string }; Body: { cenario: CenarioErp };  }>(
     "/pedidos/:id/processar",
     {
         schema: {
